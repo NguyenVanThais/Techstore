@@ -1,0 +1,22 @@
+# Môi trường ảo
+venv/
+.venv/
+
+# File Python tạm
+__pycache__/
+*.pyc
+*.pyo
+
+# Biến môi trường
+.env
+
+# Cấu hình VS Code
+.vscode/
+
+# File hệ thống
+.DS_Store
+Thumbs.db
+
+# File xuất ra
+exports/
+reports/*.pdf
