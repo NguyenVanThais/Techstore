@@ -1,0 +1,10 @@
+pymongo
+matplotlib
+reportlab
+tkcalendar
+pillow
+python-dotenv
+openpyxl
+# Tro ly AI dung Claude API (tuy chon — khong co ANTHROPIC_API_KEY trong .env
+# thi tro ly van chay o che do offline, khong can goi thu vien nay)
+anthropic
