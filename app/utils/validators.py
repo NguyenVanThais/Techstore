@@ -1,4 +1,5 @@
 """Kiem tra du lieu nhap truoc khi cham toi database."""
+import re
 from datetime import datetime
 
 
@@ -16,8 +17,14 @@ def require_text(value: str, field: str, max_len: int = 200) -> str:
 
 
 def parse_price(value: str, field: str = "Giá") -> float:
+    text = str(value).replace(",", "").strip()
+    # Chinh app hien thi gia dang '1.500.000' nen phai nhan lai dung dinh dang
+    # do: cac cum 3 chu so ngan bang dau cham la phan cach hang nghin.
+    # '1.5' khong khop mau nay va van duoc hieu la so thap phan.
+    if re.fullmatch(r"\d{1,3}(\.\d{3})+", text):
+        text = text.replace(".", "")
     try:
-        number = float(str(value).replace(",", "").strip())
+        number = float(text)
     except (TypeError, ValueError):
         raise ValidationError(f"{field} phải là một số.")
     if number < 0:
