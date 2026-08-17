@@ -1,1 +1,9 @@
-﻿__pycache__/
+.env
+venv/
+__pycache__/
+*.pyc
+.docx_tools/
+exports/*.pdf
+dist/
+assets/images/*
+!assets/images/.gitkeep
