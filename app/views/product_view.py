@@ -4,23 +4,27 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from app.config import IMAGES_DIR
+from PIL import Image, ImageTk
+
+from app.config import BASE_DIR, IMAGES_DIR
 from app.models import category as category_model
 from app.models import product as product_model
+from app.services import audit_service
 from app.utils.formatters import money
 from app.utils.validators import (
     ValidationError, parse_price, parse_quantity, require_text,
 )
-from app.views import theme
+from app.views import theme, widgets
 from app.views.base_frame import BaseFrame, make_title
 
 COLUMNS = [
-    ("sku", "Mã SP", 90),
-    ("name", "Tên sản phẩm", 300),
-    ("category", "Danh mục", 130),
-    ("price", "Giá bán", 130),
-    ("stock", "Tồn kho", 80),
-    ("min_stock", "Tồn tối thiểu", 100),
+    ("sku", "Mã SP", 70),
+    ("name", "Tên sản phẩm", 210),
+    ("category", "Danh mục", 100),
+    ("price", "Giá bán", 100),
+    ("cost", "Giá vốn", 95),
+    ("stock", "Tồn kho", 60),
+    ("min_stock", "Tồn tối thiểu", 80),
 ]
 
 
@@ -45,6 +49,7 @@ class ProductView(BaseFrame):
         self.keyword = ttk.Entry(bar, width=28)
         self.keyword.grid(row=0, column=1, padx=4)
         self.keyword.bind("<Return>", lambda e: self.reload())
+        widgets.debounce_search(self.keyword, self.reload)
 
         ttk.Label(bar, text="Danh mục").grid(row=0, column=2, padx=4)
         self.category_filter = ttk.Combobox(bar, width=18, state="readonly")
@@ -65,8 +70,11 @@ class ProductView(BaseFrame):
     def _build_body(self):
         body = ttk.Frame(self)
         body.pack(fill="both", expand=True)
-        body.columnconfigure(0, weight=3)
-        body.columnconfigure(1, weight=1)
+        # minsize BAT BUOC cho cot form: Treeview co stretch=True nen tu
+        # dan cot ra chiem het phan duoc chia theo weight, neu khong ep
+        # minsize thi cot form co the bi ep con gan 0px tren man hinh hep.
+        body.columnconfigure(0, weight=3, minsize=520)
+        body.columnconfigure(1, weight=1, minsize=290)
         body.rowconfigure(0, weight=1)
 
         # bang san pham
@@ -79,7 +87,7 @@ class ProductView(BaseFrame):
         for key, title, width in COLUMNS:
             self.tree.heading(key, text=title,
                               command=lambda k=key: self._sort_by(k))
-            anchor = "e" if key in ("price", "stock", "min_stock") else "w"
+            anchor = "e" if key in ("price", "cost", "stock", "min_stock") else "w"
             self.tree.column(key, width=width, anchor=anchor)
 
         scroll = ttk.Scrollbar(table_frame, orient="vertical",
@@ -87,44 +95,24 @@ class ProductView(BaseFrame):
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        widgets.add_grid_lines(self.tree, stretch_column="name")
 
         self.tree.tag_configure("out", background=theme.OUT_OF_STOCK)
         self.tree.tag_configure("low", background=theme.LOW_STOCK)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
+        self.empty_hint = widgets.EmptyHint(
+            self.tree, "Không tìm thấy sản phẩm nào.\nThử từ khóa khác hoặc "
+                       "bấm \"Xóa lọc\".")
 
-        # form
-        form = ttk.LabelFrame(body, text="Thông tin sản phẩm", padding=12)
-        form.grid(row=0, column=1, sticky="nsew")
+        # form: khung ngoai co vien + tieu de, nut Them/Sua/Xoa GHIM DAY
+        # truoc (khong bao gio bi che), phan truong nhap cuon duoc o giua
+        # — man hinh thap hay them truong sau nay khong lam mat nut nua.
+        form_container = ttk.LabelFrame(body, text="Thông tin sản phẩm",
+                                        padding=(12, 8))
+        form_container.grid(row=0, column=1, sticky="nsew")
 
-        self.fields = {}
-        rows = [
-            ("sku", "Mã sản phẩm"),
-            ("name", "Tên sản phẩm"),
-            ("price", "Giá bán"),
-            ("stock", "Tồn kho"),
-            ("min_stock", "Tồn tối thiểu"),
-        ]
-        for index, (key, label) in enumerate(rows):
-            ttk.Label(form, text=label).grid(row=index, column=0, sticky="w", pady=4)
-            entry = ttk.Entry(form, width=24)
-            entry.grid(row=index, column=1, pady=4)
-            self.fields[key] = entry
-
-        ttk.Label(form, text="Danh mục").grid(row=5, column=0, sticky="w", pady=4)
-        self.category_box = ttk.Combobox(form, width=21, state="readonly")
-        self.category_box.grid(row=5, column=1, pady=4)
-
-        ttk.Label(form, text="Mô tả").grid(row=6, column=0, sticky="nw", pady=4)
-        self.description = tk.Text(form, width=24, height=4)
-        self.description.grid(row=6, column=1, pady=4)
-
-        self.image_label = ttk.Label(form, text="Chưa chọn ảnh", foreground="gray")
-        self.image_label.grid(row=7, column=0, columnspan=2, pady=4)
-        ttk.Button(form, text="Chọn ảnh...", command=self._pick_image).grid(
-            row=8, column=0, columnspan=2, pady=4, sticky="ew")
-
-        buttons = ttk.Frame(form)
-        buttons.grid(row=9, column=0, columnspan=2, pady=(14, 0), sticky="ew")
+        buttons = ttk.Frame(form_container)
+        buttons.pack(side="bottom", fill="x", pady=(8, 0))
         ttk.Button(buttons, text="Thêm mới", style="Accent.TButton",
                    command=self.create).pack(fill="x", pady=2)
         ttk.Button(buttons, text="Cập nhật", command=self.update).pack(fill="x", pady=2)
@@ -132,6 +120,51 @@ class ProductView(BaseFrame):
                    command=self.delete).pack(fill="x", pady=2)
         ttk.Button(buttons, text="Làm mới form", command=self.clear_form).pack(
             fill="x", pady=2)
+
+        scroller = widgets.ScrollableFrame(form_container, width=260)
+        scroller.pack(side="top", fill="both", expand=True)
+        form = scroller.body
+
+        self.fields = {}
+        rows = [
+            ("sku", "Mã sản phẩm"),
+            ("name", "Tên sản phẩm"),
+            ("price", "Giá bán"),
+            ("cost", "Giá vốn"),
+            ("stock", "Tồn kho"),
+            ("min_stock", "Tồn tối thiểu"),
+        ]
+        for index, (key, label) in enumerate(rows):
+            ttk.Label(form, text=label).grid(row=index, column=0, sticky="w", pady=4)
+            entry = ttk.Entry(form, width=19)
+            entry.grid(row=index, column=1, pady=4)
+            self.fields[key] = entry
+
+        ttk.Label(form, text="Danh mục").grid(row=6, column=0, sticky="w", pady=4)
+        self.category_box = ttk.Combobox(form, width=16, state="readonly")
+        self.category_box.grid(row=6, column=1, pady=4)
+
+        ttk.Label(form, text="Mô tả").grid(row=7, column=0, sticky="nw", pady=4)
+        self.description = tk.Text(form, width=19, height=4)
+        self.description.grid(row=7, column=1, pady=4)
+
+        # yeu thich: noi len dau danh sach o man Ban hang
+        self.favorite = tk.BooleanVar(value=False)
+        ttk.Checkbutton(form, text="★ Yêu thích (hiện đầu màn Bán hàng)",
+                        variable=self.favorite).grid(
+            row=8, column=0, columnspan=2, sticky="w", pady=4)
+
+        # anh xem truoc: giu tham chieu PhotoImage trong self._photo,
+        # khong thi Tk hien o trang vi anh bi garbage-collect ngay
+        self._photo = None
+        self.image_preview = ttk.Label(form, anchor="center")
+        self.image_preview.grid(row=9, column=0, columnspan=2, pady=(8, 2))
+
+        self.image_label = ttk.Label(form, text="Chưa chọn ảnh",
+                                     style="Muted.TLabel")
+        self.image_label.grid(row=10, column=0, columnspan=2, pady=2)
+        ttk.Button(form, text="Chọn ảnh...", command=self._pick_image).grid(
+            row=11, column=0, columnspan=2, pady=4, sticky="ew")
 
     # ---------- du lieu ----------
 
@@ -174,23 +207,28 @@ class ProductView(BaseFrame):
             else:
                 tags = ()
 
+            name = product["name"]
+            if product.get("favorite"):
+                name = "★ " + name
             self.tree.insert(
                 "", "end", iid=str(product["_id"]), tags=tags,
                 values=(
                     product.get("sku", ""),
-                    product["name"],
+                    name,
                     product["category"],
                     money(product["price"]),
+                    money(product.get("cost", 0) or 0),
                     product["stock"],
                     product.get("min_stock", 0),
                 ),
             )
+        self.empty_hint.refresh()
 
     def _sort_key(self, key: str, value: str):
         """Gia ban hien thi la '29.990.000 đ' -- so sanh chuoi se cho ra
         '29 trieu' < '3.9 trieu'. Phai doi nguoc ve so truoc khi sap xep.
         Chi giu chu so nen khong phu thuoc vao ky hieu tien te."""
-        if key == "price":
+        if key in ("price", "cost"):
             return float("".join(c for c in value if c.isdigit()) or 0)
         if key in ("stock", "min_stock"):
             return int(value)
@@ -226,6 +264,9 @@ class ProductView(BaseFrame):
         self.fields["name"].insert(0, product["name"])
         self.fields["price"].delete(0, "end")
         self.fields["price"].insert(0, int(product["price"]))
+        self.fields["cost"].delete(0, "end")
+        self.fields["cost"].insert(0, int(product.get("cost", 0) or 0))
+        self.favorite.set(bool(product.get("favorite")))
         self.fields["stock"].delete(0, "end")
         self.fields["stock"].insert(0, product["stock"])
         self.fields["min_stock"].delete(0, "end")
@@ -235,8 +276,28 @@ class ProductView(BaseFrame):
         self.description.insert("1.0", product.get("description", ""))
 
         self.image_path = product.get("image_path", "")
+        self._show_image()
+
+    def _show_image(self):
+        """Ve anh thu nho cua self.image_path len form (hoac xoa neu khong co)."""
+        name = Path(self.image_path).name if self.image_path else ""
+        full = BASE_DIR / self.image_path if self.image_path else None
+
+        if full and full.is_file():
+            try:
+                image = Image.open(full)
+                image.thumbnail((150, 110))
+                self._photo = ImageTk.PhotoImage(image)
+                self.image_preview.config(image=self._photo)
+                self.image_label.config(text=name)
+                return
+            except Exception:
+                pass   # file hong -> roi xuong nhanh "khong doc duoc"
+
+        self._photo = None
+        self.image_preview.config(image="")
         self.image_label.config(
-            text=Path(self.image_path).name if self.image_path else "Chưa chọn ảnh")
+            text=f"{name} (không đọc được ảnh)" if name else "Chưa chọn ảnh")
 
     def clear_form(self):
         self.selected_id = None
@@ -245,7 +306,8 @@ class ProductView(BaseFrame):
             entry.delete(0, "end")
         self.category_box.set("")
         self.description.delete("1.0", "end")
-        self.image_label.config(text="Chưa chọn ảnh")
+        self.favorite.set(False)
+        self._show_image()
         self.tree.selection_remove(*self.tree.selection())
 
     def _pick_image(self):
@@ -260,7 +322,7 @@ class ProductView(BaseFrame):
         target = IMAGES_DIR / Path(path).name
         shutil.copy(path, target)
         self.image_path = f"assets/images/{target.name}"
-        self.image_label.config(text=target.name)
+        self._show_image()
 
     def _read_form(self) -> dict:
         return {
@@ -268,6 +330,8 @@ class ProductView(BaseFrame):
             "name": require_text(self.fields["name"].get(), "Tên sản phẩm"),
             "category": require_text(self.category_box.get(), "Danh mục"),
             "price": parse_price(self.fields["price"].get(), "Giá bán"),
+            "cost": parse_price(self.fields["cost"].get() or "0", "Giá vốn"),
+            "favorite": self.favorite.get(),
             "stock": parse_quantity(self.fields["stock"].get(), "Tồn kho"),
             "min_stock": parse_quantity(
                 self.fields["min_stock"].get() or "0", "Tồn tối thiểu"),
@@ -282,6 +346,8 @@ class ProductView(BaseFrame):
             data = self._read_form()
             if product_model.name_exists(data["name"]):
                 raise ValidationError("Tên sản phẩm đã tồn tại.")
+            if data["sku"] and product_model.sku_exists(data["sku"]):
+                raise ValidationError(f"Mã sản phẩm '{data['sku']}' đã tồn tại.")
             product_model.create(data)
         except ValidationError as exc:
             messagebox.showwarning("Dữ liệu không hợp lệ", str(exc))
@@ -290,7 +356,8 @@ class ProductView(BaseFrame):
             messagebox.showerror("Lỗi", f"Không thêm được sản phẩm:\n{exc}")
             return
 
-        messagebox.showinfo("Thành công", "Đã thêm sản phẩm.")
+        audit_service.log("Thêm sản phẩm", data["name"])
+        widgets.toast(self, f"Đã thêm sản phẩm \"{data['name']}\"")
         self.clear_form()
         self.reload()
         self.app.refresh_stock_badge()
@@ -303,6 +370,9 @@ class ProductView(BaseFrame):
             data = self._read_form()
             if product_model.name_exists(data["name"], exclude_id=self.selected_id):
                 raise ValidationError("Tên sản phẩm đã tồn tại.")
+            if data["sku"] and product_model.sku_exists(
+                    data["sku"], exclude_id=self.selected_id):
+                raise ValidationError(f"Mã sản phẩm '{data['sku']}' đã tồn tại.")
             product_model.update(self.selected_id, data)
         except ValidationError as exc:
             messagebox.showwarning("Dữ liệu không hợp lệ", str(exc))
@@ -311,7 +381,8 @@ class ProductView(BaseFrame):
             messagebox.showerror("Lỗi", f"Không cập nhật được:\n{exc}")
             return
 
-        messagebox.showinfo("Thành công", "Đã cập nhật sản phẩm.")
+        audit_service.log("Cập nhật sản phẩm", data["name"])
+        widgets.toast(self, f"Đã cập nhật \"{data['name']}\"")
         self.reload()
         self.app.refresh_stock_badge()
 
@@ -330,7 +401,8 @@ class ProductView(BaseFrame):
             return
 
         product_model.soft_delete(self.selected_id)
-        messagebox.showinfo("Đã xóa", "Sản phẩm đã được xóa.")
+        audit_service.log("Xóa sản phẩm", product["name"])
+        widgets.toast(self, f"Đã xóa \"{product['name']}\"")
         self.clear_form()
         self.reload()
         self.app.refresh_stock_badge()

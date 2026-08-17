@@ -8,7 +8,7 @@ from tkinter import messagebox, ttk
 
 from app.models import category as category_model
 from app.utils.validators import ValidationError, require_text
-from app.views import theme
+from app.views import theme, widgets
 from app.views.base_frame import BaseFrame, make_title
 
 COLUMNS = [
@@ -50,6 +50,7 @@ class CategoryView(BaseFrame):
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        widgets.add_grid_lines(self.tree, stretch_column="description")
 
         # khong ke soc o day: dong da co tag 'empty' rieng
         self.tree.tag_configure("empty", foreground=theme.MUTED)
@@ -145,7 +146,7 @@ class CategoryView(BaseFrame):
             messagebox.showerror("Lỗi", f"Không thêm được danh mục:\n{exc}")
             return
 
-        messagebox.showinfo("Thành công", "Đã thêm danh mục.")
+        widgets.toast(self, f"Đã thêm danh mục \"{name}\"")
         self.clear_form()
         self.reload()
 
@@ -180,7 +181,7 @@ class CategoryView(BaseFrame):
             messagebox.showerror("Lỗi", f"Không cập nhật được:\n{exc}")
             return
 
-        messagebox.showinfo("Thành công", "Đã cập nhật danh mục.")
+        widgets.toast(self, f"Đã cập nhật danh mục \"{name}\"")
         self.reload()
 
     def delete(self):
@@ -203,6 +204,6 @@ class CategoryView(BaseFrame):
             return
 
         category_model.delete(self.selected_id)
-        messagebox.showinfo("Đã xóa", "Danh mục đã được xóa.")
+        widgets.toast(self, f"Đã xóa danh mục \"{category['name']}\"")
         self.clear_form()
         self.reload()
